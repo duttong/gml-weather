@@ -65,12 +65,6 @@ python flask_data.py
 python flask_data.py --source data/HCFC142B_GCMS_flask.txt --save-csv output.csv
 ```
 
----
-
-### `met_comparisons.ipynb` — Exploratory notebook
-
-Jupyter notebook with examples for loading data, querying the API, and generating plots.
-
 ## Configuration
 
 `noaa-sites.yaml` contains coordinates and metadata for 100+ NOAA monitoring stations. Each entry includes:
