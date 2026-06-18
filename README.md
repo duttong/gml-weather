@@ -6,32 +6,37 @@ Compares observed wind data from [NOAA GML](https://gml.noaa.gov/) flask measure
 
 The project fetches HCFC-142b flask measurements (which include coincident wind observations) from the NOAA GML network, then retrieves hourly reanalysis wind data for each observation timestamp via Open-Meteo. Results are saved as CSVs and visualized as time series comparison plots.
 
-Five sites are analyzed by default:
-
-| Code | Location | Lat | Lon |
-|------|----------|-----|-----|
-| ALT | Alert, Northwest Territories | 82.452°N | 62.517°W |
-| BRW | Barrow, Alaska | 71.323°N | 156.611°W |
-| CGO | Cape Grim, Tasmania | 40.683°S | 144.690°E |
-| HFM | Harvard Forest, Massachusetts | 42.500°N | 72.200°W |
-| NWR | Niwot Ridge, Colorado | 40.050°N | 105.580°W |
-
 ## Scripts
 
 ### `met_comp.py` — Main pipeline
 
-Runs the full comparison workflow: loads GML data, fetches reanalysis wind for each observation, writes enriched CSVs, and generates plots.
+Runs the full comparison workflow for a single site: loads GML data, fetches reanalysis wind for each observation, writes an enriched CSV, and generates plots.
 
 ```bash
-python met_comp.py
+python met_comp.py <SITE> [--start_date DATE] [--force] [--plot]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `SITE` | 3-letter NOAA site code (e.g. `brw`, `alt`, `nwr`) |
+| `--start_date DATE` | Start date for data and figures (`YYYY-MM-DD` or `YYYYMMDD`); default `2020-01-01` |
+| `--force` | Re-fetch GML data from gml.noaa.gov and rebuild the local CSV cache |
+| `--plot` | Display figures to screen in addition to saving them |
+
+Examples:
+
+```bash
+python met_comp.py brw
+python met_comp.py brw --start_date 2022-01-01 --plot
+python met_comp.py mlo --force --plot
 ```
 
 Outputs go to `results/`:
 - `{site}_gml_comparison.csv` — observed + reanalysis wind data
-- `wind_{site}_comparison_speed.png` — speed time series with difference panel
-- `wind_{site}_comparison_direction.png` — direction time series with difference panel
+- `wind_speed_comparison_{site}.png` — speed time series with difference panel
+- `wind_direction_comparison_{site}.png` — direction time series with difference panel
 
-Caches API responses at the day level to avoid redundant requests. If a CSV already exists for a site, it is loaded from disk rather than re-fetched.
+Caches API responses at the day level to avoid redundant requests. If a CSV already exists for a site, it is loaded from disk rather than re-fetched. Use `--force` to bypass the cache.
 
 ---
 
