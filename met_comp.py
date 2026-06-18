@@ -1,6 +1,8 @@
 #! /usr/bin/env python
 
+import argparse
 import os
+import sys
 import time
 import numpy as np
 import pandas as pd
@@ -10,11 +12,11 @@ from met_api import ArchivedMetAPI
 import flask_data
 
 api = ArchivedMetAPI("noaa-sites.yaml")
-sites = ["alt", "brw", "cgo", "nwr", "hfm"]
 RESULTS_DIR = "results"
-FIGURE_START = pd.Timestamp("2020-01-01", tz="UTC")
-gml_df = None
+DEFAULT_START_DATE = "2020-01-01"
+GML_SOURCE_URL = "https://gml.noaa.gov/aftp/data/hats/hcfcs/hcfc142b/flasks/HCFC142B_GCMS_flask.txt"
 day_cache = {}
+
 
 class MetComparison:
     def __init__(self, source_url, min_date="2020-01-01"):
@@ -102,12 +104,12 @@ def save_comparison_csv(path, df):
     out.to_csv(path, index=False, float_format="%.3f")
 
 
-def plot_wind_spd_comparison(site, site_df):
+def plot_wind_spd_comparison(site, site_df, start_date, show=False):
     api_spd_col = "api_wind_spd"
     api_dir_col = "api_wind_dir"
     subset = (
         site_df.loc[:, ["datetime_utc", "wind_spd", api_spd_col, "wind_dir", api_dir_col]]
-        .loc[lambda d: pd.to_datetime(d["datetime_utc"], errors="coerce", utc=True) >= FIGURE_START]
+        .loc[lambda d: pd.to_datetime(d["datetime_utc"], errors="coerce", utc=True) >= start_date]
         .dropna()
         .copy()
     )
@@ -133,13 +135,16 @@ def plot_wind_spd_comparison(site, site_df):
 
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, f"wind_speed_comparison_{site}.png"))
+    if show:
+        plt.show()
+    plt.close(fig)
 
 
-def plot_wind_dir_comparison(site, site_df):
+def plot_wind_dir_comparison(site, site_df, start_date, show=False):
     api_dir_col = "api_wind_dir"
     subset = (
         site_df.loc[:, ["datetime_utc", "wind_dir", api_dir_col]]
-        .loc[lambda d: pd.to_datetime(d["datetime_utc"], errors="coerce", utc=True) >= FIGURE_START]
+        .loc[lambda d: pd.to_datetime(d["datetime_utc"], errors="coerce", utc=True) >= start_date]
         .dropna()
         .copy()
     )
@@ -168,43 +173,81 @@ def plot_wind_dir_comparison(site, site_df):
 
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, f"wind_direction_comparison_{site}.png"))
+    if show:
+        plt.show()
+    plt.close(fig)
 
 
 def main():
-    global gml_df
+    parser = argparse.ArgumentParser(
+        description="Compare GML flask observations to reanalysis wind data for a single site."
+    )
+    parser.add_argument("site", help="3-letter NOAA site code (e.g. brw, alt, nwr)")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-fetch GML data from gml.noaa.gov and rebuild the local CSV cache",
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Display figures to screen in addition to saving them to results/",
+    )
+    parser.add_argument(
+        "--start_date",
+        default=None,
+        metavar="DATE",
+        help="Start date for data and figures (YYYY-MM-DD or YYYYMMDD); default 2020-01-01",
+    )
+    args = parser.parse_args()
+
+    if args.start_date is not None:
+        try:
+            start_date = pd.Timestamp(args.start_date, tz="UTC")
+        except Exception:
+            print(f"Invalid --start_date '{args.start_date}'; expected YYYY-MM-DD or YYYYMMDD", file=sys.stderr)
+            sys.exit(1)
+    else:
+        start_date = pd.Timestamp(DEFAULT_START_DATE, tz="UTC")
+
+    site = args.site.lower()
     os.makedirs(RESULTS_DIR, exist_ok=True)
     day_cache.clear()
-    comparison = MetComparison(
-        "https://gml.noaa.gov/aftp/data/hats/hcfcs/hcfc142b/flasks/HCFC142B_GCMS_flask.txt"
-    )
-    gml_df = comparison.load_gml_data()
 
-    for site in sites:
-        csv_path = os.path.join(RESULTS_DIR, f"{site}_gml_comparison.csv")
-        if os.path.exists(csv_path):
-            print(f"[{site}] loading cached comparison data from {csv_path}")
-            site_df = pd.read_csv(csv_path, parse_dates=["datetime_utc"])
-            # Backward compatibility with older per-site API column names.
-            legacy_spd_col = f"{site}_wind_spd"
-            legacy_dir_col = f"{site}_wind_dir"
-            if "api_wind_spd" not in site_df.columns and legacy_spd_col in site_df.columns:
-                site_df = site_df.rename(columns={legacy_spd_col: "api_wind_spd"})
-            if "api_wind_dir" not in site_df.columns and legacy_dir_col in site_df.columns:
-                site_df = site_df.rename(columns={legacy_dir_col: "api_wind_dir"})
-            if "api_wind_spd" in site_df.columns and "api_wind_dir" in site_df.columns:
-                save_comparison_csv(csv_path, site_df)
-        else:
-            print(f"[{site}] cache miss; fetching API data and writing {csv_path}")
-            site_df = gml_df.loc[gml_df["site"] == site].copy()
-            if site_df.empty:
-                continue
-            site_df = enrich_site_with_api(site, site_df)
+    csv_path = os.path.join(RESULTS_DIR, f"{site}_gml_comparison.csv")
+
+    if not args.force and os.path.exists(csv_path):
+        print(f"[{site}] loading cached comparison data from {csv_path}")
+        site_df = pd.read_csv(csv_path, parse_dates=["datetime_utc"])
+        # Backward compatibility with older per-site API column names.
+        legacy_spd_col = f"{site}_wind_spd"
+        legacy_dir_col = f"{site}_wind_dir"
+        if "api_wind_spd" not in site_df.columns and legacy_spd_col in site_df.columns:
+            site_df = site_df.rename(columns={legacy_spd_col: "api_wind_spd"})
+        if "api_wind_dir" not in site_df.columns and legacy_dir_col in site_df.columns:
+            site_df = site_df.rename(columns={legacy_dir_col: "api_wind_dir"})
+        if "api_wind_spd" in site_df.columns and "api_wind_dir" in site_df.columns:
             save_comparison_csv(csv_path, site_df)
-
+    else:
+        if args.force:
+            print(f"[{site}] --force: re-fetching GML data from {GML_SOURCE_URL}")
+        else:
+            print(f"[{site}] cache miss; fetching GML and API data, writing {csv_path}")
+        comparison = MetComparison(GML_SOURCE_URL, min_date=start_date.isoformat())
+        gml_df = comparison.load_gml_data()
+        site_df = gml_df.loc[gml_df["site"] == site].copy()
         if site_df.empty:
-            continue
-        plot_wind_spd_comparison(site, site_df)
-        plot_wind_dir_comparison(site, site_df)
+            print(f"[{site}] no data found in GML file for site '{site}'", file=sys.stderr)
+            sys.exit(1)
+        site_df = enrich_site_with_api(site, site_df)
+        save_comparison_csv(csv_path, site_df)
+
+    if site_df.empty:
+        print(f"[{site}] no data to plot", file=sys.stderr)
+        sys.exit(1)
+
+    plot_wind_spd_comparison(site, site_df, start_date, show=args.plot)
+    plot_wind_dir_comparison(site, site_df, start_date, show=args.plot)
 
 
 if __name__ == "__main__":
